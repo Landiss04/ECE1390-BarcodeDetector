@@ -143,7 +143,60 @@ class BarcodeImage:
 class BarcodeDetector:
     """ Detects the barcodes from the images, applys different image processing methods.
 
-    Attributes:
+    Attributes:  blur_ksize:  odd Gaussian kernel size applied before gradients
+        sobel_ksize: Sobel kernel size
+        window:      side length of the box window used to integrate gradient
+                     statistics (should be roughly the size of a few bars)
     """
-    def __init__(self):
-        pass
+    def __init__(blur_ksize=5, sobel_ksize=3, window=21):
+        self.blur_ksize = blur_ksize
+        self.sobel_ksize = sobel_ksize
+        self.window = window
+
+ def __init__(self, blur_ksize=5, sobel_ksize=3, window=21):
+        self.blur_ksize = blur_ksize    # how much to smooth the image first (must be odd)
+        self.sobel_ksize = sobel_ksize  # size of the edge-detecting filter
+        self.window = window            # size of the neighborhood we look at around each pixel
+
+    def compute_score(self, img): #this is what Dallal was suggesting we do 
+        k = self.blur_ksize
+        w = (self.window, self.window)  # neighborhood as a (width, height) tuple
+        eps = 1e-6                      # tiny number to avoid dividing by zero later
+
+        img.blurred = cv2.GaussianBlur(img.gray, (k, k), 0) # Blur the grayscale image slightly so camera noise doesn't create fake edges
+        # Convert to float so the edge math can go negative
+        f = img.blurred.astype(np.float32)
+
+        img.gx = cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=self.sobel_ksize) #how fast brightness changes left-to-right (big at vertical bars)
+        img.gy = cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=self.sobel_ksize) #how fast brightness changes top-to-bottom (small at vertical bars)
+
+        # Score 1: the simple version from our proposal 
+        ax = cv2.boxFilter(np.abs(img.gx), -1, w)# Average the horizontal edge strength over each neighborhood
+        ay = cv2.boxFilter(np.abs(img.gy), -1, w)# Average the vertical edge strength over each neighborhood
+        # Barcode = strong horizontal change minus vertical change; negatives become 0
+        img.score_gxgy = self._normalize(np.clip(ax - ay, 0, None))
+
+        # Score 2: the tilt-proof version (structure tensor)
+       
+        img.jxx = cv2.boxFilter(img.gx * img.gx, -1, w) # Average gx*gx over each neighborhood: total horizontal edge energy
+        img.jyy = cv2.boxFilter(img.gy * img.gy, -1, w)  # Average gy*gy: total vertical edge energy
+        img.jxy = cv2.boxFilter(img.gx * img.gy, -1, w)# Average gx*gy: whether the edges lean diagonally (this is what captures tilt)
+
+        # Energy = how strong the edges are overall in the neighborhood
+        img.energy = img.jxx + img.jyy
+        # Coherence = how much the edges agree on one direction
+        # (near 1 = all parallel like barcode bars, near 0 = pointing everywhere)
+        img.coherence = np.sqrt((img.jxx - img.jyy) ** 2 + 4 * img.jxy ** 2) \
+                        / (img.energy + eps)
+
+        # Multiply so a pixel needs both strong edges and a consistent direction.
+        # (Coherence alone would light up on flat, noisy areas.)
+        img.score = self._normalize(img.coherence * img.energy)
+        return img.score
+
+    @staticmethod
+    def _normalize(m):
+        m = m.astype(np.float32)
+        lo, hi = float(m.min()), float(m.max())  # darkest and brightest values in the map
+        # Stretch so the min becomes 0 and the max becomes 1; all zeros if the map is flat
+        return (m - lo) / (hi - lo) if hi > lo else np.zeros_like(m)
