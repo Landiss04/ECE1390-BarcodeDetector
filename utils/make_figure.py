@@ -85,7 +85,7 @@ def main():
     for bars, vals, pct in ((b1, rates, True), (b2, means, False)):
         for bar, v in zip(bars, vals):
             ax.text(bar.get_x() + bar.get_width() / 2, v + 0.01,
-                    f"{100 * v:.0f}%" if pct else f"{v:.2f}", ha="center", fontsize=9)
+                    f"{100 * v:.1f}%" if pct else f"{v:.2f}", ha="center", fontsize=9)
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[m] for m in METHODS])
     ax.set_ylim(0, 1.1)
