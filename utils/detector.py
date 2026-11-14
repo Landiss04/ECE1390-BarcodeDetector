@@ -148,12 +148,7 @@ class BarcodeDetector:
         window:      side length of the box window used to integrate gradient
                      statistics (should be roughly the size of a few bars)
     """
-    def __init__(blur_ksize=5, sobel_ksize=3, window=21):
-        self.blur_ksize = blur_ksize
-        self.sobel_ksize = sobel_ksize
-        self.window = window
-
- def __init__(self, blur_ksize=5, sobel_ksize=3, window=21):
+    def __init__(self, blur_ksize=5, sobel_ksize=3, window=21):
         self.blur_ksize = blur_ksize    # how much to smooth the image first (must be odd)
         self.sobel_ksize = sobel_ksize  # size of the edge-detecting filter
         self.window = window            # size of the neighborhood we look at around each pixel
@@ -200,3 +195,70 @@ class BarcodeDetector:
         lo, hi = float(m.min()), float(m.max())  # darkest and brightest values in the map
         # Stretch so the min becomes 0 and the max becomes 1; all zeros if the map is flat
         return (m - lo) / (hi - lo) if hi > lo else np.zeros_like(m)
+
+    def segment(self, img, which="tensor"):
+        """turn a score map into a binary image with otsu
+
+        which: "tensor" uses the structure tensor score, "gxgy" uses the simple score
+        """
+        # pick which score map to threshold
+        score_map = img.score if which == "tensor" else img.score_gxgy
+
+        # otsu needs an 8-bit image, so stretch the 0..1 scores up to 0..255
+        score8 = (score_map * 255).astype(np.uint8)
+
+        # otsu picks the threshold from the histogram, nothing to tune
+        img.otsu_thresh, img.binary = cv2.threshold(
+            score8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return img.binary
+
+    def pick_largest(self, img):
+        """keep only the biggest white blob in img.binary as the predicted mask"""
+        # label every connected white blob (label 0 is the background)
+        n, img.labels, img.stats, _ = cv2.connectedComponentsWithStats(
+            img.binary, connectivity=8)
+
+        # start with an empty prediction
+        img.pred_mask = np.zeros(img.gray.shape, dtype=bool)
+
+        # nothing white at all, so the prediction stays empty
+        if n <= 1:
+            return img.pred_mask
+
+        # skip the background and take the blob with the largest area
+        areas = img.stats[1:, cv2.CC_STAT_AREA]
+        best = 1 + int(np.argmax(areas))
+        img.pred_mask = img.labels == best
+        return img.pred_mask
+
+    def detect(self, img, which="tensor"):
+        """minimal pipeline: score -> otsu -> largest blob -> iou"""
+        # clear anything left over from a previous run
+        img.reset()
+
+        # score every pixel, threshold it, keep the biggest blob
+        self.compute_score(img)
+        self.segment(img, which)
+        self.pick_largest(img)
+
+        # compare against the ground truth mask
+        img.compute_iou()
+        return img.pred_mask
+
+    def baseline(self, img, dark_is_object=True):
+        """baseline: otsu on the plain gray image, keep the largest blob
+
+        dark_is_object: True treats the dark side of the otsu split as the object
+        """
+        # clear anything left over from a previous run
+        img.reset()
+
+        # otsu on the plain gray image, no blur and no gradients
+        flag = cv2.THRESH_BINARY_INV if dark_is_object else cv2.THRESH_BINARY
+        img.otsu_thresh, img.binary = cv2.threshold(
+            img.gray, 0, 255, flag + cv2.THRESH_OTSU)
+
+        # keep the biggest blob and score it
+        self.pick_largest(img)
+        img.compute_iou()
+        return img.pred_mask
