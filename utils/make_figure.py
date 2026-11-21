@@ -26,6 +26,10 @@ LABELS = {
     "baseline_light": "baseline\n(light = object)",
     "gxgy": "Gx-Gy score",
     "tensor": "structure tensor\nscore",
+    "gxgy_morph":      "Gx-Gy\n+ close/open",
+    "tensor_morph":    "tensor\n+ close/open",
+    "gxgy_no_close":   "Gx-Gy\nopen only",
+    "tensor_no_close": "tensor\nopen only",
 }
 
 
@@ -53,7 +57,7 @@ def pick_examples(rows, method):
 def overlay(name, method, detector):
     """image with the ground truth outline in green and our prediction in red"""
     img = BarcodeImage.from_name(name, DATASET)
-    detector.detect(img, which=method)
+    METHODS[method](detector, img)
     out = img.image.copy()
     for mask, color in ((img.gt_mask, (0, 255, 0)), (img.pred_mask, (0, 0, 255))):
         contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL,

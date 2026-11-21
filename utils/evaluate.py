@@ -28,8 +28,17 @@ EXCLUDE = {"IMAG0494", "IMAG0495", "IMAG0496", "IMAG0499", "PICT0027a", "PICT002
 METHODS = {
     "baseline_dark": lambda d, i: d.baseline(i, dark_is_object=True),
     "baseline_light": lambda d, i: d.baseline(i, dark_is_object=False),
-    "gxgy": lambda d, i: d.detect(i, which="gxgy"),
-    "tensor": lambda d, i: d.detect(i, which="tensor"),
+
+    "gxgy": lambda d, i: d.detect(i, which="gxgy", use_close=False, use_open=False),
+    "tensor": lambda d, i: d.detect(i, which="tensor", use_close=False, use_open=False),
+
+    #full pipeline, closing + opening
+    "gxgy_morph": lambda d, i: d.detect(i, which="gxgy"),
+    "tensor_morph": lambda d, i: d.detect(i, which="tensor"),
+
+    #opening only, no closing
+    "gxgy_no_close":   lambda d, i: d.detect(i, which="gxgy",   use_close=False),
+    "tensor_no_close": lambda d, i: d.detect(i, which="tensor", use_close=False),
 }
 
 

@@ -148,10 +148,12 @@ class BarcodeDetector:
         window:      side length of the box window used to integrate gradient
                      statistics (should be roughly the size of a few bars)
     """
-    def __init__(self, blur_ksize=5, sobel_ksize=3, window=21):
+    def __init__(self, blur_ksize=5, sobel_ksize=3, window=21, close_ksize=(21,21), open_ksize=(7,7)):
         self.blur_ksize = blur_ksize    # how much to smooth the image first (must be odd)
         self.sobel_ksize = sobel_ksize  # size of the edge-detecting filter
         self.window = window            # size of the neighborhood we look at around each pixel
+        self.close_ksize = close_ksize # (w,h) of the closing element
+        self.open_ksize = open_ksize # (w,h) of the opening element
 
     def compute_score(self, img): #this is what Dallal was suggesting we do 
         k = self.blur_ksize
@@ -212,11 +214,32 @@ class BarcodeDetector:
             score8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return img.binary
 
-    def pick_largest(self, img):
-        """keep only the biggest white blob in img.binary as the predicted mask"""
+    def morph(self, img, use_close=True, use_open=True):
+        """closing merges fragments into one blob, opening removes the small specks
+
+        a skipped step passes its input straight through, so even with no closing
+        and no opening img.opened is still filled in
+        """
+
+        if use_close:
+            k = cv2.getStructuringElement(cv2.MORPH_RECT, self.close_ksize)
+            img.closed = cv2.morphologyEx(img.binary, cv2.MORPH_CLOSE, k)
+        else:
+            img.closed = img.binary
+
+        if use_open:
+            k = cv2.getStructuringElement(cv2.MORPH_RECT, self.open_ksize)
+            img.opened = cv2.morphologyEx(img.closed, cv2.MORPH_OPEN, k)
+        else:
+            img.opened = img.closed
+
+        return img.opened
+
+    def pick_largest(self, img, src):
+        """keep only the biggest white blob in src as the predicted mask"""
         # label every connected white blob (label 0 is the background)
         n, img.labels, img.stats, _ = cv2.connectedComponentsWithStats(
-            img.binary, connectivity=8)
+            src, connectivity=8)
 
         # start with an empty prediction
         img.pred_mask = np.zeros(img.gray.shape, dtype=bool)
@@ -231,15 +254,16 @@ class BarcodeDetector:
         img.pred_mask = img.labels == best
         return img.pred_mask
 
-    def detect(self, img, which="tensor"):
-        """minimal pipeline: score -> otsu -> largest blob -> iou"""
+    def detect(self, img, which="tensor", use_close=True, use_open=True):
+        """pipeline: score -> otsu -> close -> open -> largest blob -> iou"""
         # clear anything left over from a previous run
         img.reset()
 
         # score every pixel, threshold it, keep the biggest blob
         self.compute_score(img)
-        self.segment(img, which)
-        self.pick_largest(img)
+        self.segment(img, which) 
+        self.morph(img, use_close, use_open)
+        self.pick_largest(img, img.opened)
 
         # compare against the ground truth mask
         img.compute_iou()
@@ -259,6 +283,6 @@ class BarcodeDetector:
             img.gray, 0, 255, flag + cv2.THRESH_OTSU)
 
         # keep the biggest blob and score it
-        self.pick_largest(img)
+        self.pick_largest(img, img.binary)
         img.compute_iou()
         return img.pred_mask
