@@ -6,6 +6,7 @@ import sys
 import csv
 from pathlib import Path
 import numpy as np
+import json
 
 # detector.py lives next to this file, so add this folder to the import path
 UTILS_DIR = Path(__file__).resolve().parent
@@ -41,6 +42,11 @@ METHODS = {
     "tensor_no_close": lambda d, i: d.detect(i, which="tensor", use_close=False),
 }
 
+def load_split():
+    """read the fixed tune/test split made by make_split.py"""
+    with open(PROJECT_ROOT / "split.json") as f:
+        split = json.load(f)
+    return set(split["tune"]), set(split["test"])
 
 def summarize(rows, names):
     """print detection rate and mean iou for each method over the given image names"""
@@ -57,11 +63,13 @@ def main():
     names = sorted(p.stem for p in (DATASET / "Original").glob("*.png"))
     detector = BarcodeDetector()
 
+    tune,test = load_split()
     # run every method on every image and keep the iou
     rows = []
     for name in names:
         img = BarcodeImage.from_name(name, DATASET)
-        row = {"name": name, "gt_angle": img.gt_angle}
+        row = {"name": name, "gt_angle": img.gt_angle,
+               "split": "tune" if name in tune else "test" if name in test else "excluded"}
         for m, run in METHODS.items():
             run(detector, img)
             row[m] = img.iou
@@ -70,16 +78,15 @@ def main():
     # save the per image results so the figure script can reuse them
     OUT_DIR.mkdir(exist_ok=True)
     with open(OUT_DIR / "per_image_iou.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["name", "gt_angle", *METHODS])
+        writer = csv.DictWriter(f, fieldnames=["name", "gt_angle", "split", *METHODS])
         writer.writeheader()
         writer.writerows(rows)
 
-    # report on every image, then without the excluded ones
-    print(f"\nall images (n={len(names)})")
-    summarize(rows, set(names))
-    kept = set(names) - EXCLUDE
-    print(f"\nwithout excluded images (n={len(kept)})")
-    summarize(rows, kept)
+    # tune on these, report on test only once settings are frozen
+    print(f"\ntune split (n={len(tune)})")
+    summarize(rows, tune)
+    print(f"\ntest split (n={len(test)})")
+    summarize(rows, test)
 
 
 if __name__ == "__main__":

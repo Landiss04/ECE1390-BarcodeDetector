@@ -127,12 +127,6 @@ class BarcodeImage:
 
         self.iou = None
 
-    def overlay(self):
-        pass
-
-    def save_stages(self, out_dir):
-        pass
-
     def __repr__(self):
         h, w = self.gray.shape
         return (f"BarcodeImage(name={self.name!r}, size={w}x{h}, "
