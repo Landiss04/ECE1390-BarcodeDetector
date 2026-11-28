@@ -22,6 +22,7 @@ class BarcodeImage:
         # ground truth (not cleared by reset)
         self.gt_mask = None
         self.gt_angle = None
+        self.gt_tilt = None
         if mask_path is not None:
             mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
             if mask is None:
@@ -81,7 +82,28 @@ class BarcodeImage:
             raise ValueError(f"{self.name}: gt mask is empty")
 
         self.gt_angle = cv2.minAreaRect(pts)[2]
+        self.gt_tilt = self.gradient_tilt(self.gray, self.gt_mask)
         return self.gt_angle
+
+    @staticmethod
+    def gradient_tilt(gray, mask):
+        """tilt of the bars away from vertical inside mask, in degrees from 0 to 90
+
+        uses the dominant gradient direction (structure tensor summed over the
+        mask). gradients point across the bars, so vertical bars give horizontal
+        gradients and tilt 0. this does not depend on the mask's shape, unlike
+        minAreaRect, whose long side can run along or across the bars
+        """
+        f = cv2.GaussianBlur(gray, (5, 5), 0).astype(np.float32)
+        gx = cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=3)[mask]
+        gy = cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=3)[mask]
+
+        # dominant gradient direction, in degrees from horizontal
+        theta = 0.5 * np.degrees(np.arctan2(2 * np.sum(gx * gy),
+                                            np.sum(gx * gx) - np.sum(gy * gy)))
+        # fold so it does not matter which way the gradient points
+        a = theta % 180
+        return float(min(a, 180 - a))
 
     def compute_iou(self):
         """setting iou, via gt and pred masks

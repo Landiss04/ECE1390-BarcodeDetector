@@ -72,7 +72,7 @@ def main():
     rows = []
     for name in names:
         img = BarcodeImage.from_name(name, DATASET)
-        row = {"name": name, "gt_angle": img.gt_angle,
+        row = {"name": name, "gt_angle": img.gt_angle, "gt_tilt": img.gt_tilt,
                "split": "tune" if name in tune else "test" if name in test else "excluded"}
         for m, run in METHODS.items():
             run(detector, img)
@@ -82,7 +82,7 @@ def main():
     # save the per image results so the figure script can reuse them
     OUT_DIR.mkdir(exist_ok=True)
     with open(OUT_DIR / "per_image_iou.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["name", "gt_angle", "split", *METHODS])
+        writer = csv.DictWriter(f, fieldnames=["name", "gt_angle", "gt_tilt", "split", *METHODS])
         writer.writeheader()
         writer.writerows(rows)
 
