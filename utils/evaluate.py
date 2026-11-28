@@ -40,6 +40,10 @@ METHODS = {
     #opening only, no closing
     "gxgy_no_close":   lambda d, i: d.detect(i, which="gxgy",   use_close=False),
     "tensor_no_close": lambda d, i: d.detect(i, which="tensor", use_close=False),
+
+    #full pipeline, closing + opening + shape based blob detection
+    "gxgy_shape": lambda d, i: d.detect(i, which="gxgy", select="shape"),
+    "tensor_shape": lambda d, i: d.detect(i, which="tensor", select="shape"),
 }
 
 def load_split():

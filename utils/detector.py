@@ -142,12 +142,18 @@ class BarcodeDetector:
         window:      side length of the box window used to integrate gradient
                      statistics (should be roughly the size of a few bars)
     """
-    def __init__(self, blur_ksize=5, sobel_ksize=3, window=21, close_ksize=(21,21), open_ksize=(7,7)):
+    def __init__(self, blur_ksize=5, sobel_ksize=3, window=21, close_ksize=(21,21), open_ksize=(7,7),
+                 min_area_frac=0.01, min_rect=0.5, aspect_range=(1.0, 6.0)):
         self.blur_ksize = blur_ksize    # how much to smooth the image first (must be odd)
         self.sobel_ksize = sobel_ksize  # size of the edge-detecting filter
         self.window = window            # size of the neighborhood we look at around each pixel
         self.close_ksize = close_ksize # (w,h) of the closing element
         self.open_ksize = open_ksize # (w,h) of the opening element
+
+        #shape based blob selection
+        self.min_area_frac = min_area_frac #smallest blob that was kept (as a fraction of the area)
+        self.min_rect = min_rect #blob area / minarearect must be at least this to be valid
+        self.aspect_range = aspect_range #(low, high) allowed for long side / short side
 
     def compute_score(self, img): #this is what Dallal was suggesting we do 
         k = self.blur_ksize
@@ -248,8 +254,66 @@ class BarcodeDetector:
         img.pred_mask = img.labels == best
         return img.pred_mask
 
-    def detect(self, img, which="tensor", use_close=True, use_open=True):
-        """pipeline: score -> otsu -> close -> open -> largest blob -> iou"""
+    def pick_shape(self, img, src):
+        """keep the blob that looks most like a barcode
+
+        a blob passes if it is big enough, fills most of its minAreaRect
+        (rectangularity) and has a barcode-like aspect ratio. among the blobs that
+        pass, the one with the highest area * rectangularity wins. if none pass,
+        the largest blob wins
+        """
+
+        #label every conn. blob
+        n, img.labels, img.stats, _ = cv2.connectedComponentsWithStats(src, connectivity=8)
+        img.pred_mask = np.zeros(img.gray.shape, dtype=bool)
+        img.candidates = []
+
+        if n <= 1:
+            return img.pred_mask #nothing is white, prediction is empty
+
+        min_area = self.min_area_frac * img.gray.size
+        lo, hi = self.aspect_range
+
+        for k in range(1, n):
+            area = int(img.stats[k, cv2.CC_STAT_AREA])
+
+            #skipping tiny blobs
+            if area < min_area:
+                continue
+
+            pts = cv2.findNonZero((img.labels == k).astype(np.uint8))
+            rect = cv2.minAreaRect(pts)
+            w,h = rect[1]
+            if min(w,h) == 0:
+                continue #one pixel wide cannot have a shape
+
+            rectangularity = area / (w * h)
+            aspect = max(w,h) / min(w,h)
+            passed = rectangularity >= self.min_rect and lo <= aspect <= hi
+
+            img.candidates.append({"label": k, "area": area, "rect": rect,
+                                   "rectangularity": rectangularity, "aspect": aspect, "passed":passed})
+
+        passing = [c for c in img.candidates if c["passed"]]
+        if passing:
+            best = max(passing, key=lambda c: c["area"] * c["rectangularity"])
+            label, img.pred_rect = best["label"], best["rect"]
+        else:
+            #none pass, pick the largest blob
+            label = 1 + int(np.argmax(img.stats[1:, cv2.CC_STAT_AREA]))
+            pts = cv2.findNonZero((img.labels == label).astype(np.uint8))
+            img.pred_rect = cv2.minAreaRect(pts)
+
+        img.pred_angle = img.pred_rect[2]
+        img.pred_mask = img.labels == label
+        return img.pred_mask
+
+    def detect(self, img, which="tensor", use_close=True, use_open=True, select="largest"):
+        """pipeline: score -> otsu -> close -> open -> blob selection -> iou
+
+        select: "largest" keeps the biggest blob, "shape" uses the rectangularity
+        and aspect ratio rules in pick_shape
+        """
         # clear anything left over from a previous run
         img.reset()
 
@@ -257,7 +321,10 @@ class BarcodeDetector:
         self.compute_score(img)
         self.segment(img, which) 
         self.morph(img, use_close, use_open)
-        self.pick_largest(img, img.opened)
+        if select == "shape":
+            self.pick_shape(img, img.opened)
+        else:
+            self.pick_largest(img, img.opened)
 
         # compare against the ground truth mask
         img.compute_iou()

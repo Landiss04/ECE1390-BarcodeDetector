@@ -30,6 +30,8 @@ LABELS = {
     "tensor_morph":    "tensor\n+ close/open",
     "gxgy_no_close":   "Gx-Gy\nopen only",
     "tensor_no_close": "tensor\nopen only",
+    "gxgy_shape":      "Gx-Gy\n+ shape select",
+    "tensor_shape":    "tensor\n+ shape select",
 }
 
 
